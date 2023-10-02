@@ -1,0 +1,42 @@
+mandatoryAccounts:
+  - name: Management
+    description: >-
+      The management (primary) account. Do not change the name field for this
+      mandatory account. Note, the account name key does not need to match the
+      AWS account name.
+    email: aws+root@companyemail.com
+    organizationalUnit: Root
+    warm: false
+  - name: LogArchive
+    description: >-
+      The log archive account. Do not change the name field for this mandatory
+      account. Note, the account name key does not need to match the AWS account
+      name.
+    email: aws+logarchive@companyemail.com
+    organizationalUnit: Security
+    warm: false
+  - name: Audit
+    description: >-
+      The security audit account (also referred to as the audit account). Do not
+      change the name field for this mandatory account. Note, the account name
+      key does not need to match the AWS account name.
+    email: aws+audit@companyemail.com
+    organizationalUnit: Security
+    warm: false
+workloadAccounts:
+  - name: Network
+    description: Networking account
+    email: aws+network@companyemail.com
+    organizationalUnit: Infrastructure
+  - name: App-A-Sandbox
+    description: App A Sandbox
+    email: aws+appa_sandbox@companyemail.com
+    organizationalUnit: Sandbox
+  - name: App-A-Development
+    description: App A Development
+    email: aws+appa_development@companyemail.com
+    organizationalUnit: Development
+  - name: App-A-Production
+    description: App A Production
+    email: aws+appa_production@companyemail.com
+    organizationalUnit: Production

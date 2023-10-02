@@ -1,0 +1,58 @@
+providers: []
+policySets:
+  - deploymentTargets:
+      organizationalUnits:
+        - Root
+    policies:
+      - name: Default-Boundary-Policy
+        policy: iam-policies/boundary-policy.json
+  ######
+  # You may define global policy sets here, but consider Terraform for other policy management
+  # TODO: link repos
+  ######
+roleSets:
+  - deploymentTargets:
+      organizationalUnits:
+        - Root
+    roles:
+      - name: EC2-Default-SSM-AD-Role
+        instanceProfile: true
+        assumedBy:
+          - type: service
+            principal: ec2.amazonaws.com
+        policies:
+          awsManaged:
+            - AmazonSSMManagedInstanceCore
+            - AmazonSSMDirectoryServiceAccess
+            - CloudWatchAgentServerPolicy
+      # This role is utilized by the Backup Plans defined in global-config.yaml
+      # We create this role in every account where we plan to have Backup Plans
+      # and Backup Vaults
+      - name: Backup-Role
+        assumedBy:
+          - type: service
+            principal: backup.amazonaws.com
+        policies:
+          awsManaged:
+            - service-role/AWSBackupServiceRolePolicyForBackup
+            - service-role/AWSBackupServiceRolePolicyForRestores
+  ######
+  # Beyond this point, you should be managing IAM via Terraform repos, unless global roles are needed
+  # TODO: link repos here
+  ######
+groupSets:
+  - deploymentTargets:
+      organizationalUnits:
+        - Root
+    groups:
+      - name: Administrators
+        policies:
+          awsManaged:
+            - AdministratorAccess
+identityCenter:
+  name: identityCenter
+  delegatedAdminAccount: Audit
+  #####
+  # Beyond this point, you should be managing IAM via Terraform repos
+  # 
+  #####

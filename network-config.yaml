@@ -1,0 +1,658 @@
+homeRegion: &HOME_REGION us-east-1
+account: &NETWORKING Network #Network account
+
+#####################################
+# Delete default VPCs-- use this    #
+# object to delete default VPCs in  #
+# any non-excluded accounts         #
+#####################################
+defaultVpc:
+  delete: true
+  excludeAccounts: []
+
+#####################################
+# Transit Gateways-- use this object #
+# to deploy transit gateways         #
+#####################################
+transitGateways:
+  - name: &TGW tgw-networkmain
+    account: *NETWORKING
+    region: *HOME_REGION
+    shareTargets:
+      organizationalUnits:
+        - Networking
+        - Production
+    asn: 62000
+    dnsSupport: enable
+    vpnEcmpSupport: enable
+    defaultRouteTableAssociation: disable
+    defaultRouteTablePropagation: disable
+    autoAcceptSharingAttachments: enable
+    routeTables:
+      - name: &RT_NETWORK_MAIN_CORE rt-networking-main-core
+        routes: []
+      - name: &RT_NETWORK_MAIN_SHARED rt-networking-main-shared
+        routes:
+          - destinationCidrBlock: 0.0.0.0/0
+            attachment:
+              vpcName: vpc-network-inspection
+              account: *NETWORKING
+      - name: rt-networking-main-standalone
+        routes: []
+
+#####################################
+# VPN Connections to TFW            #
+#####################################
+# Ref - https://awslabs.github.io/landing-zone-accelerator-on-aws/classes/_aws_accelerator_config.CustomerGatewayConfig.html
+customerGateways:
+  - name: vpngw-locationa
+    account: Network
+    region: *HOME_REGION
+    ipAddress: 222.222.22.222 # IP provided by IT
+    asn: 52200 # ASN provided by IT team
+    vpnConnections:
+      - name: vpn_connection-locA
+        transitGateway: *TGW
+        routeTableAssociations:
+          - *RT_NETWORK_MAIN_CORE
+        routeTablePropagations:
+          - *RT_NETWORK_MAIN_CORE
+        staticRoutesOnly: false
+        tunnelSpecifications:
+          - tunnelInsideCidr: 111.111.11.40/30
+          - tunnelInsideCidr: 111.111.11.48/30
+  - name: vpngw-locationb
+    account: Network
+    region: *HOME_REGION
+    ipAddress: 123.123.123.123 # IP provided by IT
+    asn: 52201 # ASN provided by IT team
+    vpnConnections:
+      - name: vpn_connection-locB
+        transitGateway: *TGW
+        routeTableAssociations:
+          - *RT_NETWORK_MAIN_CORE
+        routeTablePropagations:
+          - *RT_NETWORK_MAIN_CORE
+        staticRoutesOnly: false
+        tunnelSpecifications:
+          - tunnelInsideCidr: 132.132.11.22/30
+          - tunnelInsideCidr: 132.132.22.11/30
+            
+#####################################
+# DHCP options -- use this object   #
+# to define DHCP options sets to use #
+# for VPCs.                         #
+#####################################
+# TODO: this needs revision
+dhcpOptions:
+  - name: dhcp-opts
+    accounts:
+      - Network
+    regions:
+      - *HOME_REGION
+    domainName: companyemail.com
+    domainNameServers:
+      - 1.1.1.1
+      - 2.2.2.2
+    netbiosNameServers:
+      - 1.1.1.1
+      - 2.2.2.2
+    netbiosNodeType: 2
+    ntpServers:
+      - 1.1.1.1
+      - 2.2.2.2
+
+#####################################
+# Central network services -- use   #
+# this object to define a delegated  #
+# admin account and configure        #
+# advanced networking services      #
+#####################################
+centralNetworkServices:
+  delegatedAdminAccount: *NETWORKING
+  ipams:
+    - name: ipam
+      region: *HOME_REGION
+      description: Main Landing Zone IPAM Pool
+      operatingRegions:
+        - *HOME_REGION
+      pools:
+        - name: &BASE_POOL base  # VPCs should never reference this pool
+          description: Main Landing Zone IPAM Pool
+          provisionedCidrs:
+            - 10.0.0.0/8 
+        - name: &IPAM_PRODUCTION_POOL home-region-production
+          description: Pool for *HOME_REGION production resources
+          locale: *HOME_REGION
+          provisionedCidrs:
+            - 10.0.0.0/15
+          sourceIpamPool: *BASE_POOL
+        - name: &IPAM_DEVELOPMENT_POOL home-region-development
+          description: Pool for *HOME_REGION development resources
+          locale: *HOME_REGION
+          provisionedCidrs:
+            - 10.30.0.0/15
+          sourceIpamPool: *BASE_POOL
+        - name: &IPAM_SANDBOX_POOL home-region-sandbox
+          description: Pool for *HOME_REGION sandbox resources
+          locale: *HOME_REGION
+          provisionedCidrs:
+            - 10.60.0.0/15
+          sourceIpamPool: *BASE_POOL
+  route53Resolver:
+    endpoints:
+      - name: inbound-shared
+        type: INBOUND
+        vpc: vpc-network-endpoints
+        subnets:
+          - endpoints-a
+          - endpoints-b
+      - name: outbound-shared
+        type: OUTBOUND
+        vpc: vpc-network-endpoints
+        subnets:
+          - endpoints-a
+          - endpoints-b
+    queryLogs:
+      name: accelerator-query-logs
+      destinations:
+        - s3
+        - cloud-watch-logs
+      shareTargets:
+        organizationalUnits:
+          - Infrastructure
+
+#####################################
+# Prefix lists -- use this object to #
+# deploy prefix lists to be used for #
+# security groups, subnet routes,   #
+# and/or TGW static routes          #
+#####################################
+# TODO: this needs revision
+prefixLists:
+  - name: onpremise-prefix-list
+    accounts:
+      - *NETWORKING
+    regions:
+      - *HOME_REGION
+    addressFamily: 'IPv4'
+    maxEntries: 7
+    entries:
+      - 127.0.0.0/15
+
+#####################################
+# Endpoint policies -- use this     #
+# object to define standard policies #
+# for VPC endpoints                 #
+#####################################
+endpointPolicies:
+  - name: Default
+    document: vpc-endpoint-policies/default.json
+  - name: Ec2
+    document: vpc-endpoint-policies/ec2.json
+
+#####################################
+# VPCs-- use this object to deploy  #
+# a VPC in a single account and     #
+# region.                           #
+#####################################
+vpcs:
+  - name: vpc-network-endpoints
+    account: *NETWORKING
+    region: *HOME_REGION
+    ipamAllocations:
+      - ipamPoolName: *IPAM_PRODUCTION_POOL
+        netmaskLength: 24
+    internetGateway: false
+    dhcpOptions: dhcp-opts
+    enableDnsHostnames: true
+    enableDnsSupport: true
+    instanceTenancy: default
+    routeTables:
+      - name: rt-network-endpoints-tgw-a
+        routes: []
+      - name: rt-network-endpoints-tgw-b
+        routes: []
+      - name: rt-network-endpoints-a
+        routes:
+          - name: TgwRoute
+            destination: 0.0.0.0/0
+            type: transitGateway
+            target: *TGW
+          - name: S3Gateway
+            type: gatewayEndpoint
+            target: s3
+          - name: DynamoDBGateway
+            type: gatewayEndpoint
+            target: dynamodb
+      - name: rt-network-endpoints-b
+        routes:
+          - name: TgwRoute
+            destination: 0.0.0.0/0
+            type: transitGateway
+            target: *TGW
+          - name: S3Gateway
+            type: gatewayEndpoint
+            target: s3
+          - name: DynamoDBGateway
+            type: gatewayEndpoint
+            target: dynamodb
+    subnets:
+      - name: endpoints-a
+        availabilityZone: a
+        routeTable: rt-network-endpoints-a
+        ipamAllocation:
+          ipamPoolName: *IPAM_PRODUCTION_POOL
+          netmaskLength: 26
+      - name: endpoints-b
+        availabilityZone: b
+        routeTable: rt-network-endpoints-b
+        ipamAllocation:
+          ipamPoolName: *IPAM_PRODUCTION_POOL
+          netmaskLength: 26
+      - name: endpoints-tgw-a
+        availabilityZone: a
+        routeTable: rt-network-endpoints-tgw-a
+        ipamAllocation:
+          ipamPoolName: *IPAM_PRODUCTION_POOL
+          netmaskLength: 28
+      - name: endpoints-tgw-b
+        availabilityZone: b
+        routeTable: rt-network-endpoints-tgw-b
+        ipamAllocation:
+          ipamPoolName: *IPAM_PRODUCTION_POOL
+          netmaskLength: 28
+    transitGatewayAttachments:
+      - name: tgw-endpoints
+        transitGateway:
+          name: *TGW
+          account: *NETWORKING
+        routeTableAssociations:
+          - *RT_NETWORK_MAIN_CORE
+        routeTablePropagations:
+          - *RT_NETWORK_MAIN_SHARED
+        subnets:
+          - endpoints-tgw-a
+          - endpoints-tgw-b
+    gatewayEndpoints:
+      defaultPolicy: Default
+      endpoints:
+        - service: s3
+        - service: dynamodb
+    interfaceEndpoints:
+      central: true
+      defaultPolicy: Default
+      subnets:
+        - endpoints-a
+        - endpoints-b
+      endpoints:
+        - service: ec2
+        - service: ec2messages
+        - service: ssm
+        - service: ssmmessages
+        - service: kms
+        - service: logs
+        - service: secretsmanager
+        # - service: cloudformation
+        # - service: access-analyzer
+        # - service: application-autoscaling
+        # - service: appmesh-envoy-management
+        # - service: athena
+        # - service: autoscaling
+        # - service: autoscaling-plans
+        # - service: clouddirectory
+        # - service: cloudtrail
+        # - service: codebuild
+        # - service: codecommit
+        # - service: codepipeline
+        # - service: config
+        # - service: datasync
+        # - service: ecr.dkr
+        # - service: ecs
+        # - service: ecs-agent
+        # - service: ecs-telemetry
+        # - service: elasticfilesystem
+        # - service: elasticloadbalancing
+        # - service: elasticmapreduce
+        # - service: events
+        # - service: execute-api
+        # - service: git-codecommit
+        # - service: glue
+        # - service: kinesis-streams
+        # - service: monitoring
+        # - service: sagemaker.api
+        # - service: sagemaker.runtime
+        # - service: servicecatalog
+        # - service: sms
+        # - service: sns
+        # - service: sqs
+        # - service: storagegateway
+        # - service: sts
+        # - service: transfer
+        # - service: workspaces
+        # - service: awsconnector
+        # - service: ecr.api
+        # - service: kinesis-firehose
+        # - service: states
+        # - service: acm-pca
+        # - service: cassandra
+        # - service: ebs
+        # - service: elasticbeanstalk
+        # - service: elasticbeanstalk-health
+        # - service: email-smtp
+        # - service: license-manager
+        # - service: macie2
+        # - service: notebook
+        # - service: synthetics
+        # - service: transfer.server
+
+  - name: vpc-network-inspection
+    account: *NETWORKING
+    region: *HOME_REGION
+    ipamAllocations:
+      - ipamPoolName: *IPAM_PRODUCTION_POOL
+        netmaskLength: 24
+    internetGateway: true
+    routeTables:
+      - name: rt-network-inspection-tgw-a
+        routes:
+          - name: TgwRoute
+            destination: 10.0.0.0/8
+            type: transitGateway
+            target: *TGW
+          - name: NatGwRoute
+            destination: 0.0.0.0/0
+            type: natGateway
+            target: nat-network-inspection-a
+      - name: rt-network-inspection-tgw-b
+        routes:
+          - name: TgwRoute
+            destination: 10.0.0.0/8
+            type: transitGateway
+            target: *TGW
+          - name: NatGwRoute
+            destination: 0.0.0.0/0
+            type: natGateway
+            target: nat-network-inspection-a
+      - name: rt-network-inspection-nat-a
+        routes:
+          - name: IgwRoute
+            destination: 0.0.0.0/0
+            type: internetGateway
+            target: IGW
+          - name: TgwRoute
+            destination: 10.0.0.0/8
+            type: transitGateway
+            target: *TGW
+      - name: rt-network-inspection-nat-b
+        routes:
+          - name: IgwRoute
+            destination: 0.0.0.0/0
+            type: internetGateway
+            target: IGW
+          - name: TgwRoute
+            destination: 10.0.0.0/8
+            type: transitGateway
+            target: *TGW
+    subnets:
+      - name: network-inspection-tgw-a
+        availabilityZone: a
+        routeTable: rt-network-inspection-tgw-a
+        ipamAllocation:
+          ipamPoolName: *IPAM_PRODUCTION_POOL
+          netmaskLength: 28
+      - name: network-inspection-tgw-b
+        availabilityZone: b
+        routeTable: rt-network-inspection-tgw-b
+        ipamAllocation:
+          ipamPoolName: *IPAM_PRODUCTION_POOL
+          netmaskLength: 28
+      - name: network-inspection-nat-a
+        availabilityZone: a
+        routeTable: rt-network-inspection-nat-a
+        ipamAllocation:
+          ipamPoolName: *IPAM_PRODUCTION_POOL
+          netmaskLength: 27
+      - name: network-inspection-nat-b
+        availabilityZone: b
+        routeTable: rt-network-inspection-nat-b
+        ipamAllocation:
+          ipamPoolName: *IPAM_PRODUCTION_POOL
+          netmaskLength: 27
+    natGateways:
+      - name: nat-network-inspection-a
+        subnet: network-inspection-nat-a
+      - name: nat-network-inspection-b
+        subnet: network-inspection-nat-b
+    transitGatewayAttachments:
+      - name: tgwa-network-inspection
+        transitGateway:
+          name: *TGW
+          account: *NETWORKING
+        options:
+          applianceModeSupport: enable
+        routeTableAssociations:
+          - *RT_NETWORK_MAIN_CORE
+        routeTablePropagations:
+          - *RT_NETWORK_MAIN_SHARED
+        subnets:
+          - network-inspection-tgw-a
+          - network-inspection-tgw-b
+    useCentralEndpoints: true
+
+  - name: vpc-appa-development
+    account: *NETWORKING
+    region: *HOME_REGION
+    ipamAllocations:
+      - ipamPoolName: *IPAM_DEVELOPMENT_POOL
+        netmaskLength: 24
+    routeTables:
+      - name: rt-appa-tgw-development-a
+        routes: []
+      - name: rt-appa-tgw-development-b
+        routes: []
+      - name: rt-appa-app-development-a
+        routes:
+          - name: TgwRoute
+            destination: 0.0.0.0/0
+            type: transitGateway
+            target: *TGW
+          - name: S3Gateway
+            type: gatewayEndpoint
+            target: s3
+          - name: DynamoDBGateway
+            type: gatewayEndpoint
+            target: dynamodb
+      - name: rt-appa-app-development-b
+        routes:
+          - name: TgwRoute
+            destination: 0.0.0.0/0
+            type: transitGateway
+            target: *TGW
+          - name: S3Gateway
+            type: gatewayEndpoint
+            target: s3
+          - name: DynamoDBGateway
+            type: gatewayEndpoint
+            target: dynamodb
+    subnets:
+      - name: subnet-appa-app-dev-a
+        availabilityZone: a
+        routeTable: rt-appa-app-development-a
+        shareTargets:
+          accounts:
+            - &APPADEV App-A-Development
+        ipamAllocation:
+          ipamPoolName: *IPAM_DEVELOPMENT_POOL
+          netmaskLength: 26
+      - name: subnet-appa-app-dev-b
+        availabilityZone: b
+        routeTable: rt-appa-app-development-b
+        shareTargets:
+          accounts:
+            - *APPADEV
+        ipamAllocation:
+          ipamPoolName: *IPAM_DEVELOPMENT_POOL
+          netmaskLength: 26
+      - name: subnet-appa-tgw-dev-a
+        availabilityZone: a
+        routeTable: rt-appa-tgw-development-a
+        shareTargets:
+          accounts:
+            - *APPADEV
+        ipamAllocation:
+          ipamPoolName: *IPAM_DEVELOPMENT_POOL
+          netmaskLength: 28
+      - name: subnet-appa-tgw-dev-b
+        availabilityZone: b
+        routeTable: rt-appa-tgw-development-b
+        shareTargets:
+          accounts:
+            - *APPADEV
+        ipamAllocation:
+          ipamPoolName: *IPAM_DEVELOPMENT_POOL
+          netmaskLength: 28
+    transitGatewayAttachments:
+      - name: tgwa-appa-development
+        transitGateway:
+          name: *TGW
+          account: *NETWORKING
+          options:
+            applianceModeSupport: enable
+        routeTableAssociations:
+          - *RT_NETWORK_MAIN_SHARED
+        routeTablePropagations:
+          - *RT_NETWORK_MAIN_CORE
+        subnets:
+          - subnet-appa-tgw-dev-a
+          - subnet-appa-tgw-dev-b
+    gatewayEndpoints:
+      defaultPolicy: Default
+      endpoints:
+        - service: s3
+        - service: dynamodb
+    useCentralEndpoints: true
+
+  - name: vpc-appa-production
+    account: *NETWORKING
+    region: *HOME_REGION
+    ipamAllocations:
+      - ipamPoolName: *IPAM_PRODUCTION_POOL
+        netmaskLength: 24
+    routeTables:
+      - name: rt-appa-tgw-production-a
+        routes: []
+      - name: rt-appa-tgw-production-b
+        routes: []
+      - name: rt-appa-app-production-a
+        routes:
+          - name: TgwRoute
+            destination: 0.0.0.0/0
+            type: transitGateway
+            target: *TGW
+          - name: S3Gateway
+            type: gatewayEndpoint
+            target: s3
+          - name: DynamoDBGateway
+            type: gatewayEndpoint
+            target: dynamodb
+      - name: rt-appa-app-production-b
+        routes:
+          - name: TgwRoute
+            destination: 0.0.0.0/0
+            type: transitGateway
+            target: *TGW
+          - name: S3Gateway
+            type: gatewayEndpoint
+            target: s3
+          - name: DynamoDBGateway
+            type: gatewayEndpoint
+            target: dynamodb
+      - name: rt-appa-app-production-c
+        routes:
+          - name: TgwRoute
+            destination: 0.0.0.0/0
+            type: transitGateway
+            target: *TGW
+          - name: S3Gateway
+            type: gatewayEndpoint
+            target: s3
+          - name: DynamoDBGateway
+            type: gatewayEndpoint
+            target: dynamodb
+    subnets:
+      - name: subnet-appa-app-production-a
+        availabilityZone: a
+        routeTable: rt-appa-app-production-a
+        shareTargets:
+          accounts:
+            - &APPAPROD App-A-Production
+        ipamAllocation:
+          ipamPoolName: *IPAM_PRODUCTION_POOL
+          netmaskLength: 26
+      - name: subnet-appa-app-production-b
+        availabilityZone: b
+        routeTable: rt-appa-app-production-b
+        shareTargets:
+          accounts:
+            - *APPAPROD
+        ipamAllocation:
+          ipamPoolName: *IPAM_PRODUCTION_POOL
+          netmaskLength: 26
+      - name: subnet-appa-app-production-c
+        availabilityZone: c
+        routeTable: rt-appa-app-production-c
+        shareTargets:
+          accounts:
+            - *APPAPROD
+        ipamAllocation:
+          ipamPoolName: *IPAM_PRODUCTION_POOL
+          netmaskLength: 26
+      - name: subnet-appa-tgw-production-a
+        availabilityZone: a
+        routeTable: rt-appa-tgw-production-a
+        shareTargets:
+          accounts:
+            - *APPAPROD
+        ipamAllocation:
+          ipamPoolName: *IPAM_PRODUCTION_POOL
+          netmaskLength: 28
+      - name: subnet-appa-tgw-production-b
+        availabilityZone: b
+        routeTable: rt-appa-tgw-production-b
+        shareTargets:
+          accounts:
+            - *APPAPROD
+        ipamAllocation:
+          ipamPoolName: *IPAM_PRODUCTION_POOL
+          netmaskLength: 28
+      - name: subnet-appa-tgw-production-c
+        availabilityZone: c
+        routeTable: rt-appa-tgw-production-c
+        shareTargets:
+          accounts:
+            - *APPAPROD
+        ipamAllocation:
+          ipamPoolName: *IPAM_PRODUCTION_POOL
+          netmaskLength: 28 
+    transitGatewayAttachments:
+      - name: tgwa-appa-production
+        transitGateway:
+          name: *TGW
+          account: *NETWORKING
+          options:
+            applianceModeSupport: enable
+        routeTableAssociations:
+          - *RT_NETWORK_MAIN_SHARED
+        routeTablePropagations:
+          - *RT_NETWORK_MAIN_CORE
+        subnets:
+          - subnet-appa-tgw-production-a
+          - subnet-appa-tgw-production-b
+          - subnet-appa-tgw-production-c
+    gatewayEndpoints:
+      defaultPolicy: Default
+      endpoints:
+        - service: s3
+        - service: dynamodb
+    useCentralEndpoints: true
